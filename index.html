@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>晴れる屋ポイント履歴集計ツール（自動保存機能付き）</title>
+    <style>
+        body { font-family: "Helvetica Neue", Arial, sans-serif; background-color: #f4f4f9; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #ea2d2d; padding-bottom: 10px; }
+        
+        /* Input Section */
+        .input-section { margin-bottom: 20px; padding: 15px; background: #fafafa; border: 1px dashed #ccc; border-radius: 5px; }
+        .input-section p { margin-top: 0; font-weight: bold; color: #555; }
+        .input-instruction { font-size: 14px; color: #666; margin-bottom: 5px; }
+        textarea { width: 100%; height: 100px; margin-top: 5px; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; }
+        
+        .btn-group { margin-top: 10px; display: flex; gap: 10px; }
+        button { background-color: #ea2d2d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #c92222; }
+        
+        button.secondary { background-color: #6c757d; }
+        button.secondary:hover { background-color: #5a6268; }
+
+        /* Dashboard */
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .card { background: #fff; padding: 15px; border-radius: 5px; border: 1px solid #eee; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .card h3 { margin: 0 0 10px; font-size: 14px; color: #666; }
+        .card .value { font-size: 24px; font-weight: bold; }
+        .plus { color: #28a745; }
+        .minus { color: #dc3545; }
+
+        /* Filters */
+        .filters { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; background: #eee; padding: 10px; border-radius: 5px; }
+        select { padding: 8px; border-radius: 4px; border: 1px solid #ccc; }
+
+        /* Table */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f8f8; font-weight: bold; }
+        tr:hover { background-color: #f1f1f1; }
+        .num { text-align: right; }
+        .tag { padding: 2px 6px; border-radius: 3px; font-size: 12px; color: white; display: inline-block; }
+        .tag-store { background-color: #17a2b8; } /* 店舗 */
+        .tag-tc { background-color: #007bff; } /* 通販/TC */
+        .tag-event { background-color: #ffc107; color: #333; } /* 大会 */
+        .tag-use { background-color: #dc3545; } /* 利用 */
+        .tag-other { background-color: #6c757d; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>晴れる屋 ポイント履歴集計</h1>
+
+    <div class="input-section">
+        <p>ポイント履歴一覧の表からデータを貼り付けてください</p>
+        <div class="input-instruction">
+            ※ 表のヘッダー<strong>「利用or獲得日」</strong>から、一番下の行の<strong>「備考」</strong>までを範囲選択してコピーし、ここに貼り付けてください。
+        </div>
+        <textarea id="rawInput" placeholder="ここにコピーした内容を貼り付け..."></textarea>
+        <div class="btn-group">
+            <button onclick="processData(true)">集計する</button>
+            <button class="secondary" onclick="clearData()">クリア</button>
+        </div>
+    </div>
+
+    <div class="filters">
+        <label>絞り込み:</label>
+        <select id="yearFilter" onchange="applyFilters()">
+            <option value="all">全ての期間</option>
+        </select>
+        <select id="typeFilter" onchange="applyFilters()">
+            <option value="all">全ての分類</option>
+            <option value="TC">通販/TC注文</option>
+            <option value="STORE">店舗購入</option>
+            <option value="EVENT">大会参加 (Point Granter)</option>
+            <option value="USE">ポイント利用</option>
+        </select>
+    </div>
+
+    <div class="dashboard">
+        <div class="card">
+            <h3>獲得合計</h3>
+            <div class="value plus" id="totalGained">0 pt</div>
+        </div>
+        <div class="card">
+            <h3>利用合計</h3>
+            <div class="value minus" id="totalUsed">0 pt</div>
+        </div>
+        <div class="card">
+            <h3>収支 (獲得 - 利用)</h3>
+            <div class="value" id="netBalance">0 pt</div>
+        </div>
+        <div class="card">
+            <h3>件数</h3>
+            <div class="value" id="recordCount">0 件</div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>日付</th>
+                <th>分類</th>
+                <th>備考 / 詳細</th>
+                <th>注文番号</th>
+                <th class="num">ポイント</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            </tbody>
+    </table>
+</div>
+
+<script>
+    let allData = [];
+    const STORAGE_KEY = 'hareruya_point_history_data';
+
+    // 画面ロード時にlocalStorageからデータを復元
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (savedData) {
+            document.getElementById('rawInput').value = savedData;
+            processData(false); // アラートを出さずに実行
+        }
+    });
+
+    // Main parsing function
+    function processData(showAlert = true) {
+        const rawText = document.getElementById('rawInput').value;
+        if (!rawText.trim()) {
+            if (showAlert) alert("テキストを入力してください");
+            return;
+        }
+
+        // データを保存
+        localStorage.setItem(STORAGE_KEY, rawText);
+
+        allData = parseRawText(rawText);
+        setupYearFilter(allData);
+        applyFilters();
+    }
+
+    // データをクリアする関数
+    function clearData() {
+        if(confirm('入力データと保存データを削除しますか？')) {
+            document.getElementById('rawInput').value = '';
+            localStorage.removeItem(STORAGE_KEY);
+            allData = [];
+            document.getElementById('tableBody').innerHTML = '';
+            updateDashboard([]);
+            setupYearFilter([]);
+        }
+    }
+
+    // Parser Logic
+    function parseRawText(text) {
+        // Remove empty lines
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l !== '');
+        const records = [];
+        let currentRecord = null;
+
+        // Regex helpers
+        const dateRegex = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/;
+        const pointRegex = /^([+-])([0-9,]+)$/; // Matches +46, -1,200
+        const orderIdRegex = /^\d{7,}$/; 
+
+        const pushRecord = (rec) => {
+            if (rec && rec.pointsStr) { 
+                rec.points = parseInt(rec.pointsStr.replace(/,/g, ''), 10);
+                
+                if (isNaN(rec.points)) return;
+
+                if (rec.points < 0) {
+                    rec.type = 'USE';
+                    rec.typeName = '利用';
+                } else if (rec.remarks.includes('Point Granter')) {
+                    rec.type = 'EVENT';
+                    rec.typeName = '大会参加';
+                } else if (rec.remarks.includes('店舗付与')) {
+                    rec.type = 'STORE';
+                    rec.typeName = '店舗購入';
+                } else if (rec.orderId) {
+                    rec.type = 'TC';
+                    rec.typeName = '通販/TC注文';
+                } else {
+                    rec.type = 'OTHER';
+                    rec.typeName = 'その他';
+                }
+                records.push(rec);
+            }
+        };
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const dateMatch = line.match(dateRegex);
+
+            if (dateMatch) {
+                // 日付判定ロジック
+                let isExpiryDate = false;
+
+                if (currentRecord && currentRecord.pointsStr) {
+                    const tempPoints = parseInt(currentRecord.pointsStr.replace(/,/g, ''), 10);
+                    // ポイントがプラスの場合、次の日付は有効期限である可能性が高い
+                    if (tempPoints > 0 && !currentRecord.expiryDate) {
+                        isExpiryDate = true;
+                    }
+                }
+
+                if (isExpiryDate) {
+                    currentRecord.expiryDate = line;
+                } else {
+                    pushRecord(currentRecord);
+                    currentRecord = {
+                        date: line,
+                        year: parseInt(dateMatch[1]),
+                        orderId: '',
+                        pointsStr: '',
+                        remarks: '',
+                        expiryDate: ''
+                    };
+                }
+
+            } else if (currentRecord) {
+                // 日付以外のフィールド判定
+                if (line.match(pointRegex)) {
+                    currentRecord.pointsStr = line;
+                } else if (line.match(orderIdRegex)) {
+                    currentRecord.orderId = line;
+                } else {
+                    currentRecord.remarks += (currentRecord.remarks ? ' ' : '') + line;
+                }
+            }
+        }
+        pushRecord(currentRecord);
+
+        return records;
+    }
+
+    function setupYearFilter(data) {
+        // 現在の選択状態を保持する（もしあれば）
+        const currentSelection = document.getElementById('yearFilter').value;
+
+        const years = [...new Set(data.map(d => d.year))].sort((a, b) => b - a);
+        const select = document.getElementById('yearFilter');
+        select.innerHTML = '<option value="all">全ての期間</option>';
+        years.forEach(y => {
+            const option = document.createElement('option');
+            option.value = y;
+            option.textContent = y + '年';
+            select.appendChild(option);
+        });
+
+        // 以前の選択が存在すれば復元、なければall
+        if (years.some(y => y.toString() === currentSelection)) {
+             select.value = currentSelection;
+        }
+    }
+
+    function applyFilters() {
+        const yearVal = document.getElementById('yearFilter').value;
+        const typeFilter = document.getElementById('typeFilter');
+        const typeVal = typeFilter ? typeFilter.value : 'all';
+
+        const filtered = allData.filter(item => {
+            const yearMatch = yearVal === 'all' || item.year.toString() === yearVal;
+            const typeMatch = typeVal === 'all' || item.type === typeVal;
+            return yearMatch && typeMatch;
+        });
+
+        updateDashboard(filtered);
+        renderTable(filtered);
+    }
+
+    function updateDashboard(data) {
+        let gained = 0;
+        let used = 0;
+
+        data.forEach(d => {
+            if (d.points > 0) gained += d.points;
+            else used += Math.abs(d.points);
+        });
+
+        document.getElementById('totalGained').textContent = '+' + gained.toLocaleString();
+        document.getElementById('totalUsed').textContent = '-' + used.toLocaleString();
+        
+        const net = gained - used;
+        const sign = net > 0 ? '+' : '';
+        document.getElementById('netBalance').textContent = sign + net.toLocaleString() + ' pt';
+        
+        document.getElementById('recordCount').textContent = data.length + ' 件';
+    }
+
+    function renderTable(data) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+
+        data.forEach(item => {
+            const tr = document.createElement('tr');
+            
+            let tagClass = 'tag-other';
+            if (item.type === 'STORE') tagClass = 'tag-store';
+            if (item.type === 'TC') tagClass = 'tag-tc';
+            if (item.type === 'EVENT') tagClass = 'tag-event';
+            if (item.type === 'USE') tagClass = 'tag-use';
+
+            const pointClass = item.points > 0 ? 'plus' : 'minus';
+            const pointDisplay = (item.points > 0 ? '+' : '') + item.points.toLocaleString();
+
+            tr.innerHTML = `
+                <td>${item.date}</td>
+                <td><span class="tag ${tagClass}">${item.typeName}</span></td>
+                <td>${item.remarks || '-'}</td>
+                <td>${item.orderId || '-'}</td>
+                <td class="num ${pointClass}"><strong>${pointDisplay}</strong></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+</script>
+
+</body>
+</html>
