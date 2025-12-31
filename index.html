@@ -18,6 +18,8 @@
         button { background-color: #ea2d2d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background-color: #c92222; }
         button.secondary { background-color: #6c757d; }
+        button.outline { background-color: transparent; border: 1px solid #ea2d2d; color: #ea2d2d; }
+        button.outline:hover { background-color: #fff0f0; }
         
         /* Dashboard */
         .dashboard { 
@@ -32,14 +34,24 @@
         .plus { color: #28a745; }
         .minus { color: #dc3545; }
 
-        /* ★スマホ向けレイアウト調整（2列にして2行で表示） */
         @media (max-width: 600px) {
-            .dashboard {
-                grid-template-columns: 1fr 1fr; /* 強制的に2列（獲得・利用 / 収支・件数）にする */
-            }
-            .card .value { font-size: 18px; } /* 文字サイズを少し調整 */
+            .dashboard { grid-template-columns: 1fr 1fr; }
+            .card .value { font-size: 18px; }
             .card { padding: 10px; }
         }
+
+        /* Monthly Report Section */
+        #monthlySection {
+            display: none; /* 初期状態は非表示 */
+            background: #fff;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .report-header h3 { margin: 0; font-size: 18px; color: #444; }
 
         /* Filters */
         .filters { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; background: #eee; padding: 10px; border-radius: 5px; }
@@ -55,6 +67,10 @@
         .tag-event { background-color: #ffc107; color: #333; }
         .tag-use { background-color: #dc3545; }
         .tag-other { background-color: #6c757d; }
+
+        /* Monthly Table Specifics */
+        .monthly-table th { background-color: #ea2d2d; color: white; }
+        .monthly-table tr:nth-child(even) { background-color: #f9f9f9; }
     </style>
 </head>
 <body>
@@ -95,8 +111,32 @@
         </div>
     </div>
 
+    <div style="margin-bottom: 20px; text-align: right;">
+        <button class="outline" onclick="toggleMonthlySection()">📊 月別集計を表示</button>
+    </div>
+
+    <div id="monthlySection">
+        <div class="report-header">
+            <h3>月別レポート</h3>
+            <select id="monthlyYearSelect" onchange="renderMonthlyTable()">
+                </select>
+        </div>
+        <table class="monthly-table">
+            <thead>
+                <tr>
+                    <th>月</th>
+                    <th class="num">獲得 (+)</th>
+                    <th class="num">利用 (-)</th>
+                    <th class="num">収支</th>
+                </tr>
+            </thead>
+            <tbody id="monthlyTableBody">
+                </tbody>
+        </table>
+    </div>
+
     <div class="filters">
-        <label>絞り込み:</label>
+        <label>履歴絞り込み:</label>
         <select id="yearFilter" onchange="applyFilters()">
             <option value="all">全ての期間</option>
         </select>
@@ -104,7 +144,7 @@
             <option value="all">全ての分類</option>
             <option value="TC">通販/TC注文</option>
             <option value="STORE">店舗購入</option>
-            <option value="EVENT">大会参加 (Point Granter)</option>
+            <option value="EVENT">大会参加</option>
             <option value="USE">ポイント利用</option>
         </select>
     </div>
@@ -148,7 +188,13 @@
         allData = parseRawText(rawText);
 
         setupYearFilter(allData);
+        setupMonthlyYearSelect(allData); // 月別用のプルダウンも更新
         applyFilters();
+        
+        // もし月別集計が開いていたら更新する
+        if(document.getElementById('monthlySection').style.display === 'block'){
+            renderMonthlyTable();
+        }
     }
 
     function clearData() {
@@ -159,6 +205,98 @@
             document.getElementById('tableBody').innerHTML = '';
             updateDashboard([]);
             setupYearFilter([]);
+            setupMonthlyYearSelect([]);
+            document.getElementById('monthlySection').style.display = 'none';
+        }
+    }
+
+    // 月別集計エリアの表示切り替え
+    function toggleMonthlySection() {
+        const section = document.getElementById('monthlySection');
+        const isHidden = section.style.display === 'none' || section.style.display === '';
+        
+        if (isHidden) {
+            section.style.display = 'block';
+            renderMonthlyTable(); // 表示時に計算
+        } else {
+            section.style.display = 'none';
+        }
+    }
+
+    // 月別用年度プルダウンのセットアップ
+    function setupMonthlyYearSelect(data) {
+        const years = [...new Set(data.map(d => d.year))].sort((a, b) => b - a);
+        const select = document.getElementById('monthlyYearSelect');
+        const currentVal = select.value;
+        
+        select.innerHTML = '';
+        if(years.length === 0) {
+            const op = document.createElement('option');
+            op.text = "データなし";
+            select.appendChild(op);
+            return;
+        }
+
+        years.forEach(y => {
+            const option = document.createElement('option');
+            option.value = y;
+            option.textContent = y + '年';
+            select.appendChild(option);
+        });
+
+        // 以前選択していた値があれば維持、なければ最新年
+        if (years.some(y => y.toString() === currentVal)) {
+            select.value = currentVal;
+        } else if (years.length > 0) {
+            select.value = years[0];
+        }
+    }
+
+    // 月別テーブルの描画
+    function renderMonthlyTable() {
+        const select = document.getElementById('monthlyYearSelect');
+        const year = parseInt(select.value);
+        if (isNaN(year)) return;
+
+        // 1月〜12月の枠を作る
+        const monthlyData = {};
+        for(let i=1; i<=12; i++) {
+            monthlyData[i] = { gained: 0, used: 0 };
+        }
+
+        // 該当年のデータを集計
+        allData.forEach(d => {
+            if (d.year === year) {
+                if (d.points > 0) {
+                    monthlyData[d.month].gained += d.points;
+                } else {
+                    monthlyData[d.month].used += Math.abs(d.points);
+                }
+            }
+        });
+
+        const tbody = document.getElementById('monthlyTableBody');
+        tbody.innerHTML = '';
+
+        // 12ヶ月分ループして表示
+        for(let i=1; i<=12; i++) {
+            const m = monthlyData[i];
+            const net = m.gained - m.used;
+            // データが全くない月は薄く表示するか、そのまま表示するか（ここではそのまま表示）
+            
+            // 0の場合はグレー表示にするためのクラス制御などをしても良いがシンプルに実装
+            const tr = document.createElement('tr');
+            
+            const netClass = net > 0 ? 'plus' : (net < 0 ? 'minus' : '');
+            const netSign = net > 0 ? '+' : '';
+
+            tr.innerHTML = `
+                <td><strong>${i}月</strong></td>
+                <td class="num plus">${m.gained > 0 ? '+' + m.gained.toLocaleString() : '-'}</td>
+                <td class="num minus">${m.used > 0 ? '-' + m.used.toLocaleString() : '-'}</td>
+                <td class="num ${netClass}"><strong>${net !== 0 ? netSign + net.toLocaleString() : '-'}</strong></td>
+            `;
+            tbody.appendChild(tr);
         }
     }
 
@@ -197,7 +335,16 @@
                     currentRecord.expiryDate = line;
                 } else {
                     pushRecord(currentRecord);
-                    currentRecord = { date: line, year: parseInt(dateMatch[1]), orderId: '', pointsStr: '', remarks: '', expiryDate: '' };
+                    // month（月）を追加で保存
+                    currentRecord = { 
+                        date: line, 
+                        year: parseInt(dateMatch[1]), 
+                        month: parseInt(dateMatch[2]), // 月を追加
+                        orderId: '', 
+                        pointsStr: '', 
+                        remarks: '', 
+                        expiryDate: '' 
+                    };
                 }
             } else if (currentRecord) {
                 if (line.match(pointRegex)) currentRecord.pointsStr = line;
