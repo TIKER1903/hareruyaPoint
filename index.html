@@ -43,16 +43,31 @@
             .report-controls select { flex: 1; }
         }
 
-        /* Monthly Report Section */
-        #monthlySection {
-            display: none; /* 初期状態は非表示 */
-            background: #fff;
-            padding: 20px;
-            border: 1px solid #eee;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none; /* 初期非表示 */
+            justify-content: center; align-items: center;
+            z-index: 1000;
         }
+        .modal-content {
+            background: #fff; padding: 20px; border-radius: 8px;
+            width: 90%; max-width: 800px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            position: relative;
+            max-height: 90vh; overflow-y: auto;
+        }
+        .modal-small { max-width: 400px; text-align: center; }
+        .close-btn {
+            position: absolute; top: 10px; right: 10px;
+            border: none; background: transparent;
+            font-size: 24px; cursor: pointer; color: #999;
+            padding: 0; width: auto; height: auto;
+        }
+        .close-btn:hover { color: #333; background: transparent; }
+
+        /* Monthly Report Inside Modal */
         .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
         .report-header h3 { margin: 0; font-size: 18px; color: #444; }
         .report-controls { display: flex; gap: 10px; }
@@ -92,7 +107,7 @@
         <textarea id="rawInput" placeholder='ここにコピーしたテキストデータを貼り付け...'></textarea>
         <div class="btn-group">
             <button onclick="processData(true)">集計する</button>
-            <button class="secondary" onclick="clearData()">クリア</button>
+            <button class="secondary" onclick="confirmClear()">クリア</button>
         </div>
     </div>
 
@@ -116,36 +131,7 @@
     </div>
 
     <div style="margin-bottom: 20px; text-align: right;">
-        <button class="outline" onclick="toggleMonthlySection()">📊 月別集計を表示</button>
-    </div>
-
-    <div id="monthlySection">
-        <div class="report-header">
-            <h3>月別レポート</h3>
-            <div class="report-controls">
-                <select id="monthlyYearSelect" onchange="renderMonthlyTable()">
-                    </select>
-                <select id="monthlyTypeFilter" onchange="renderMonthlyTable()">
-                    <option value="all">全ての分類</option>
-                    <option value="TC">通販/TC注文</option>
-                    <option value="STORE">店舗購入</option>
-                    <option value="EVENT">大会参加</option>
-                    <option value="USE">ポイント利用</option>
-                </select>
-            </div>
-        </div>
-        <table class="monthly-table">
-            <thead>
-                <tr>
-                    <th>月</th>
-                    <th class="num">獲得 (+)</th>
-                    <th class="num">利用 (-)</th>
-                    <th class="num">収支</th>
-                </tr>
-            </thead>
-            <tbody id="monthlyTableBody">
-                </tbody>
-        </table>
+        <button class="outline" onclick="openMonthlyModal()">📊 月別集計を表示</button>
     </div>
 
     <div class="filters">
@@ -174,6 +160,50 @@
         </thead>
         <tbody id="tableBody"></tbody>
     </table>
+</div>
+
+<div id="monthlyModal" class="modal-overlay" onclick="closeModalOnOverlay(event, 'monthlyModal')">
+    <div class="modal-content">
+        <button class="close-btn" onclick="closeModal('monthlyModal')">&times;</button>
+        <div class="report-header">
+            <h3>月別レポート</h3>
+            <div class="report-controls">
+                <select id="monthlyYearSelect" onchange="renderMonthlyTable()">
+                    </select>
+                <select id="monthlyTypeFilter" onchange="renderMonthlyTable()">
+                    <option value="all">全ての分類</option>
+                    <option value="TC">通販/TC注文</option>
+                    <option value="STORE">店舗購入</option>
+                    <option value="EVENT">大会参加</option>
+                    <option value="USE">ポイント利用</option>
+                </select>
+            </div>
+        </div>
+        <table class="monthly-table">
+            <thead>
+                <tr>
+                    <th>月</th>
+                    <th class="num">獲得 (+)</th>
+                    <th class="num">利用 (-)</th>
+                    <th class="num">収支</th>
+                </tr>
+            </thead>
+            <tbody id="monthlyTableBody">
+                </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="confirmModal" class="modal-overlay" onclick="closeModalOnOverlay(event, 'confirmModal')">
+    <div class="modal-content modal-small">
+        <button class="close-btn" onclick="closeModal('confirmModal')">&times;</button>
+        <h3>データ削除の確認</h3>
+        <p>入力されたデータと保存内容を<br>全て削除してもよろしいですか？</p>
+        <div class="btn-group" style="justify-content: center;">
+            <button onclick="executeClear()">削除する</button>
+            <button class="secondary" onclick="closeModal('confirmModal')">キャンセル</button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -205,36 +235,45 @@
         applyFilters();
         
         // もし月別集計が開いていたら更新する
-        if(document.getElementById('monthlySection').style.display === 'block'){
+        if(document.getElementById('monthlyModal').style.display === 'flex'){
             renderMonthlyTable();
         }
     }
 
-    function clearData() {
-        if(confirm('データを削除しますか？')) {
-            document.getElementById('rawInput').value = '';
-            localStorage.removeItem(STORAGE_KEY);
-            allData = [];
-            document.getElementById('tableBody').innerHTML = '';
-            updateDashboard([]);
-            setupYearFilter([]);
-            setupMonthlyYearSelect([]);
-            document.getElementById('monthlySection').style.display = 'none';
+    /* --- モーダル制御 --- */
+    function openMonthlyModal() {
+        document.getElementById('monthlyModal').style.display = 'flex';
+        renderMonthlyTable(); // 表示時に計算
+    }
+
+    function confirmClear() {
+        document.getElementById('confirmModal').style.display = 'flex';
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).style.display = 'none';
+    }
+
+    // 背景クリックで閉じる処理
+    function closeModalOnOverlay(e, id) {
+        if(e.target.id === id) {
+            closeModal(id);
         }
     }
 
-    // 月別集計エリアの表示切り替え
-    function toggleMonthlySection() {
-        const section = document.getElementById('monthlySection');
-        const isHidden = section.style.display === 'none' || section.style.display === '';
-        
-        if (isHidden) {
-            section.style.display = 'block';
-            renderMonthlyTable(); // 表示時に計算
-        } else {
-            section.style.display = 'none';
-        }
+    // 実際のデータ削除処理
+    function executeClear() {
+        document.getElementById('rawInput').value = '';
+        localStorage.removeItem(STORAGE_KEY);
+        allData = [];
+        document.getElementById('tableBody').innerHTML = '';
+        updateDashboard([]);
+        setupYearFilter([]);
+        setupMonthlyYearSelect([]);
+        closeModal('confirmModal');
+        closeModal('monthlyModal'); // レポートも開いていれば閉じる
     }
+    /* ------------------- */
 
     // 月別用年度プルダウンのセットアップ
     function setupMonthlyYearSelect(data) {
@@ -283,9 +322,7 @@
 
         // 該当年のデータを集計
         allData.forEach(d => {
-            // 年の一致確認
             const isYearMatch = d.year === year;
-            // 分類の一致確認 (allなら全てOK)
             const isTypeMatch = type === 'all' || d.type === type;
 
             if (isYearMatch && isTypeMatch) {
@@ -300,7 +337,6 @@
         const tbody = document.getElementById('monthlyTableBody');
         tbody.innerHTML = '';
 
-        // 12ヶ月分ループして表示
         for(let i=1; i<=12; i++) {
             const m = monthlyData[i];
             const net = m.gained - m.used;
